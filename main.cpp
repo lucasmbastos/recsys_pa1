@@ -1,3 +1,29 @@
+/*
+
+MIT License
+
+Copyright (c) 2018 Lucas de Miranda Bastos
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+
 #include <iostream>
 #include <map>
 #include <fstream>
@@ -7,25 +33,48 @@
 #include <set>
 
 
+// This is the code used to solve RecSys Practical Assignment 1, the code has lots of bad smells
+// like global varibales. Moreover, all content of work is in this file. The reason why this
+// problems exist is related with bad time management of author.
+
+
+/**
+
+@Author: Lucas de Miranda Bastos
+
+**/
+
+/*
+* Observations:
+*
+* 1 - Both the items and the users have the IDs converted to integger (to improve efficiency), so
+* the key of majority of maps are integers.
+*
+*/
+
+//--- Global Variables
+
+// Handle user mean 
 std::map<int, double> user_sum;
 std::map<int, double> user_total;
+std::map<int, double> user_mean;
 
+// Handle item mean
 std::map<int, double> item_sum;
 std::map<int, double> item_total;
-
-std::map<int, double> user_mean;
 std::map<int, double> item_mean;
+double all_item_mean = 0; // Stores the mean of product means
 
-std::map<int, double> cosine_norm;
+std::map<int, double> cosine_norm; // Used to calculate cosine similarity
 
+// Tracks all users that rate the items and vice-versa.
 std::map<int, std::set<int>> user_per_items;
 std::map<int, std::set<int>> items_rated_by_user;
 
-
+// Set and vector with all items
 std::set<int> all_items;
 std::vector<int> all_items_vector;
 
-double all_item_mean = 0;
 
 //https://stackoverflow.com/a/1489928
 int GetNumberOfDigits (int i)
@@ -35,7 +84,7 @@ int GetNumberOfDigits (int i)
 
 
 
-// M[Item][User] = Rating
+// M[Item][User] = Rating --- This is how the RatingMatrix is stored
 typedef std::map<int, std::map<int, double>> RatingMatrix;
 
 void addToMatrix(int item, int user, double rating, RatingMatrix &matrix) {
@@ -64,6 +113,7 @@ std::vector<std::string> split(const std::string& str, const std::string& delim)
     return tokens;
 }
 
+// Removes the prefix of ids and convert it to integger
 int trim_id(std::string str) {
 
     std::string output; // From StackOverflow -- https://stackoverflow.com/q/20326356
@@ -73,6 +123,9 @@ int trim_id(std::string str) {
 
     return std::stoi(output);
 }
+
+// This function reads the ratings data and extract all information that will be used. It still pre-
+// computate lots of variables (e.g: used for mean) to save time.
 
 RatingMatrix read_from_file(std::string file_path) {
 
@@ -96,7 +149,7 @@ RatingMatrix read_from_file(std::string file_path) {
         item_id = trim_id(user_item[1]);
         rating = std::stod(useritem_rating[1]);
 
-        // User Mean
+        // Handle the first occurence of user
         if(!user_sum.count(user_id)) {
             user_sum[user_id] = 0;
             user_total[user_id] = 0;
@@ -105,6 +158,7 @@ RatingMatrix read_from_file(std::string file_path) {
         user_sum[user_id] += rating;
         user_total[user_id]+= 1;
 
+        // // Handle the first occurence of item
         if(!all_items.count(item_id)) {
             item_sum[item_id] = 0;
             item_total[item_id] = 0;
@@ -118,8 +172,8 @@ RatingMatrix read_from_file(std::string file_path) {
         item_sum[item_id] += rating;
         item_total[item_id]+= 1;
 
-        user_per_items[item_id].insert(user_id);
 
+        user_per_items[item_id].insert(user_id);
         items_rated_by_user[user_id].insert(item_id);
 
 
@@ -161,11 +215,7 @@ void normalize_matrix_item(RatingMatrix &matrix) {
         std::vector<int> v_user(user_per_items[item_key].begin(), user_per_items[item_key].end());
 
         for(int user_key: v_user) {
-//            std::cout << matrix[item_key][user_key] << " - " << user_mean[user_key] << " - " << item_mean[item_key] << std::endl;
             matrix[item_key][user_key] = matrix[item_key][user_key] - user_mean[user_key] - item_mean[item_key];
-
-//            std::cout << matrix[item_key][user_key] << std::endl;
-
             cosine_norm[item_key] += pow(matrix[item_key][user_key],2);
         }
     }
@@ -176,6 +226,8 @@ void calculate_cosine_norm() {
         cosine_norm[cosine_key] = sqrt(cosine_norm[cosine_key]);
 }
 
+
+// This function formats the output data in order to match the requirements of Kaggle.
 void print_answer(int user_id, int item_id, double prediction) {
 
     int user_tab_size = 7-GetNumberOfDigits(user_id);
@@ -195,17 +247,20 @@ void print_answer(int user_id, int item_id, double prediction) {
 
 double make_prediction(int user_id, int item_id, RatingMatrix &matrix) {
 
+    // If user doesn't exist in training data
     if(!user_total.count(user_id) && all_items.count(item_id))
         return item_mean[item_id];
 
+    // If both user and item doesn't exist in training data - Non-personalized Recomendation
     if(!user_total.count(user_id) && !all_items.count(item_id))
         return all_item_mean;
 
+    // If item doesn't exist in training data
     if(user_total.count(user_id) && !all_items.count(item_id))
         return user_mean[user_id];
 
+
     std::vector<int> all_items_rated_by_user(items_rated_by_user[user_id].begin(), items_rated_by_user[user_id].end());
-//    std::vector<int> all_users_that_rated_the_item(user_per_items[item_id].begin(), user_per_items[item_id].end());
 
     double total_similarity = 0;
     double total_rate = 0;
@@ -217,14 +272,17 @@ double make_prediction(int user_id, int item_id, RatingMatrix &matrix) {
         double similarity = 0;
 
         std::set<int> intersect;
-        set_intersection(user_per_items[item_id].begin(),user_per_items[item_id].end(),user_per_items[item_rated_by_user].begin(),user_per_items[item_rated_by_user].end(),
-                         std::inserter(intersect,intersect.begin()));
+        set_intersection(
+            user_per_items[item_id].begin(),
+            user_per_items[item_id].end(),
+            user_per_items[item_rated_by_user].begin(),
+            user_per_items[item_rated_by_user].end(),
+            std::inserter(intersect,intersect.begin())
+        );
 
-        for(int user_that_rated_the_item: intersect) {
-//            std::cout << matrix[item_id][user_that_rated_the_item] << " - " << matrix[item_rated_by_user][user_that_rated_the_item] << std::endl;
+        for(int user_that_rated_the_item: intersect) 
             similarity += matrix[item_id][user_that_rated_the_item] * matrix[item_rated_by_user][user_that_rated_the_item];
 
-        }
 
         similarity = similarity/(cosine_norm[item_id]*cosine_norm[item_rated_by_user]);
 
@@ -233,10 +291,6 @@ double make_prediction(int user_id, int item_id, RatingMatrix &matrix) {
 
 
     }
-
-
-//    std::cout << total_rate << " - " << total_similarity << std::endl;
-
     double prediction = (total_similarity>0) ? (total_rate/total_similarity) : 0;
 
     prediction = prediction  + item_mean[item_id] + user_mean[user_id];
@@ -283,10 +337,15 @@ void read_targets(std::string file_path, RatingMatrix &matrix) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+
+    if (argc != 3) {
+        std::cout << "Invalid number of arguments" << std::endl;
+        return 1;
+    }
 
 
-    RatingMatrix rating_matrix_item_first = read_from_file("/home/lucas/CLionProjects/recsys_tp1/ratings.csv");
+    RatingMatrix rating_matrix_item_first = read_from_file(argv[1]);
 
     compute_item_mean();
     compute_user_mean();
@@ -297,6 +356,6 @@ int main() {
 
 
 
-    read_targets("/home/lucas/CLionProjects/recsys_tp1/targets.csv", rating_matrix_item_first);
+    read_targets(argv[2], rating_matrix_item_first);
 
 }
